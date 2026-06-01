@@ -167,13 +167,16 @@ if uploaded_file is not None:
                 
                 # Cell-level dynamic masking processor
                 def mask_cell(val):
-                    if pd.isna(val):
-                        return val
+                    # Handle NaNs and null values correctly
+                    if pd.isna(val) or val is None or str(val).strip().lower() in ["nan", "nat", "<na>", "none"]:
+                        return ""
                     
-                    masked_val = str(val)
+                    val_str = str(val).strip()
+                    if not val_str:
+                        return ""
                     
                     # 1. Apply Presidio Smart Entity Masking
-                    res = engine.mask_text(masked_val)
+                    res = engine.mask_text(val_str)
                     masked_val = res.masked_text
                     
                     # 2. Apply Custom Word / Phrase Redaction (Control C)
@@ -192,8 +195,8 @@ if uploaded_file is not None:
                 
                 # Process columns
                 for col in remaining_cols:
-                    # Map strings dynamically and run the execution engine
-                    sanitized_df[col] = sanitized_df[col].astype(str).apply(mask_cell)
+                    # Apply masking cell-by-cell without pre-casting the whole column (preserves nulls correctly)
+                    sanitized_df[col] = sanitized_df[col].apply(mask_cell)
                     
                 elapsed_time = time.time() - start_time
                 
