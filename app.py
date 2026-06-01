@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 # Import the existing generalized backend modules
-from config import DEFAULT_POLICY_PATH
+from config import POLICIES_DIR, DEFAULT_POLICY_PATH
 from app.data_masking.masking_policy import MaskingPolicy
 from app.data_masking.masking_engine import MaskingEngine
 
@@ -78,7 +78,43 @@ if uploaded_file is not None:
             
         st.divider()
         
+        # -------------------------------------------------------------
+        # AUTOMATIC SCHEMA DETECTION & COMPONENT MAPPING
+        # -------------------------------------------------------------
+        # Scan all available policy files to load aggregate column mappings
+        all_column_rules = {}
+        all_replacement_maps = {}
+        domain_configs = {}
+        
+        for pf in POLICIES_DIR.glob("*.yaml"):
+            try:
+                p = MaskingPolicy.from_yaml(str(pf))
+                all_column_rules.update(p.column_rules)
+                all_replacement_maps.update(p.replacement_map)
+                if p.domain_config:
+                    domain_configs.update(p.domain_config)
+            except Exception:
+                pass
+                
+        # Discover which specific entities are related to the columns of the uploaded file
+        detected_entities = []
+        for col in df.columns:
+            entity = None
+            # Perform a case-insensitive check against known column rules
+            for rule_col, rule_ent in all_column_rules.items():
+                if col.strip().lower() == rule_col.strip().lower():
+                    entity = rule_ent
+                    break
+            if entity and entity not in detected_entities:
+                detected_entities.append(entity)
+                
+        # Default fallback to standard PII entities if no columns match any pre-configured policy rules
+        if not detected_entities:
+            detected_entities = ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "ORGANIZATION"]
+            
+        # -------------------------------------------------------------
         # Dynamic Configuration Section
+        # -------------------------------------------------------------
         st.subheader("2. Configuration & Sensitivity Rules")
         st.write("Configure column-level overrides, smart PII scanner boundaries, and custom word targets.")
         
@@ -98,22 +134,15 @@ if uploaded_file is not None:
         with cfg_col2:
             with st.container(border=True):
                 st.write("### B: Smart Entity Recognition")
-                st.caption("Select specific PII or standard entities to scan for and redact in remaining columns.")
+                st.caption("Select PII or custom entities to scan for and redact in remaining columns.")
                 
-                # Universal, brand-agnostic scanners
-                entity_options = [
-                    "PERSON",
-                    "EMAIL_ADDRESS",
-                    "PHONE_NUMBER",
-                    "ORGANIZATION",
-                    "CREDIT_CARD",
-                    "US_SSN"
-                ]
+                # Dynamic file-specific scanners!
+                entity_options = detected_entities
                 
                 selected_entities = st.multiselect(
                     "Select entities to detect and redact:",
                     options=entity_options,
-                    default=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
+                    default=entity_options,  # Automatically check all matching scanners by default
                     help="The engine will scan cell strings in the remaining columns and mask matching instances."
                 )
             
@@ -145,11 +174,13 @@ if uploaded_file is not None:
                 # Make a copy of the dataframe to prevent side-effects
                 sanitized_df = df.copy()
                 
-                # Load the universal policy configuration directly
-                base_policy = MaskingPolicy.from_yaml(str(DEFAULT_POLICY_PATH))
-                
-                # Dynamically update the backend policy's entity rules to match the UI selections.
-                base_policy.entity_rules = selected_entities
+                # Build a dynamic policy specifically tailored to the uploaded schema
+                base_policy = MaskingPolicy(
+                    column_rules={c: all_column_rules[c] for c in df.columns if c in all_column_rules},
+                    entity_rules=selected_entities,
+                    replacement_map=all_replacement_maps,
+                    domain_config=domain_configs
+                )
                 
                 # Initialize the masking engine using our updated policy
                 engine = MaskingEngine(base_policy)
