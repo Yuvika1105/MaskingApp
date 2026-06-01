@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 # Import the existing generalized backend modules
-from config import POLICIES_DIR, DEFAULT_POLICY_PATH
+from config import DEFAULT_POLICY_PATH
 from app.data_masking.masking_policy import MaskingPolicy
 from app.data_masking.masking_engine import MaskingEngine
 
@@ -81,22 +81,19 @@ if uploaded_file is not None:
         # -------------------------------------------------------------
         # AUTOMATIC SCHEMA DETECTION & COMPONENT MAPPING
         # -------------------------------------------------------------
-        # Scan all available policy files to load aggregate column mappings
+        # Scan standard column rules to pre-select matching scanners
         all_column_rules = {}
         all_replacement_maps = {}
         domain_configs = {}
         
-        for pf in POLICIES_DIR.glob("*.yaml"):
-            try:
-                p = MaskingPolicy.from_yaml(str(pf))
-                all_column_rules.update(p.column_rules)
-                all_replacement_maps.update(p.replacement_map)
-                if p.domain_config:
-                    domain_configs.update(p.domain_config)
-            except Exception:
-                pass
-                
-        # Discover which specific entities are related to the columns of the uploaded file
+        try:
+            p = MaskingPolicy.from_yaml(str(DEFAULT_POLICY_PATH))
+            all_column_rules.update(p.column_rules)
+            all_replacement_maps.update(p.replacement_map)
+        except Exception:
+            pass
+            
+        # Discover which specific entities correspond to the columns of the uploaded file
         detected_entities = []
         for col in df.columns:
             entity = None
@@ -108,9 +105,9 @@ if uploaded_file is not None:
             if entity and entity not in detected_entities:
                 detected_entities.append(entity)
                 
-        # Default fallback to standard PII entities if no columns match any pre-configured policy rules
+        # Default pre-selected fallback if no columns match
         if not detected_entities:
-            detected_entities = ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "ORGANIZATION"]
+            detected_entities = ["PERSON", "EMAIL_ADDRESS"]
             
         # -------------------------------------------------------------
         # Dynamic Configuration Section
@@ -122,13 +119,21 @@ if uploaded_file is not None:
         
         with cfg_col1:
             with st.container(border=True):
-                st.write("### A: Full Column Redaction")
-                st.caption("Select columns to fully redact with a static placeholder (`<REDACTED>`).")
+                st.write("### A: Column Redaction & Abbreviation")
+                st.caption("Select columns to fully redact with static `<REDACTED>` or abbreviate to first & last letters.")
                 
                 fully_masked_cols = st.multiselect(
                     "Select columns to fully redact:",
                     options=df.columns.tolist(),
                     help="Every cell under these columns will be permanently replaced with '<REDACTED>'."
+                )
+                
+                # Filter out fully redacted columns to prevent selection conflicts
+                remaining_opts = [c for c in df.columns if c not in fully_masked_cols]
+                abbreviated_cols = st.multiselect(
+                    "Select columns to abbreviate (first & last letter):",
+                    options=remaining_opts,
+                    help="Every word in these columns will be abbreviated to its first and last letter (e.g. Bentley -> BY)."
                 )
             
         with cfg_col2:
@@ -136,13 +141,25 @@ if uploaded_file is not None:
                 st.write("### B: Smart Entity Recognition")
                 st.caption("Select PII or custom entities to scan for and redact in remaining columns.")
                 
-                # Dynamic file-specific scanners!
-                entity_options = detected_entities
+                # List all universal scanners so the dropdown is never empty
+                entity_options = [
+                    "PERSON",
+                    "EMAIL_ADDRESS",
+                    "PHONE_NUMBER",
+                    "ORGANIZATION",
+                    "CREDIT_CARD",
+                    "US_SSN"
+                ]
+                
+                # Pre-select only the ones dynamically discovered from the uploaded columns
+                pre_selected = [e for e in detected_entities if e in entity_options]
+                if not pre_selected:
+                    pre_selected = ["PERSON", "EMAIL_ADDRESS"]
                 
                 selected_entities = st.multiselect(
                     "Select entities to detect and redact:",
                     options=entity_options,
-                    default=entity_options,  # Automatically check all matching scanners by default
+                    default=pre_selected,
                     help="The engine will scan cell strings in the remaining columns and mask matching instances."
                 )
             
@@ -185,12 +202,36 @@ if uploaded_file is not None:
                 # Initialize the masking engine using our updated policy
                 engine = MaskingEngine(base_policy)
                 
-                # STEP A: Apply full column-level overrides (Control A)
+                # Helper to abbreviate text words (first and last letter of each word)
+                def abbreviate_text(text):
+                    if not text or pd.isna(text):
+                        return ""
+                    text_str = str(text).strip()
+                    if not text_str or text_str.lower() in ["nan", "nat", "<na>", "none"]:
+                        return ""
+                        
+                    def abbrev_word(w):
+                        w_clean = w.strip()
+                        if not w_clean.isalnum():
+                            return w_clean
+                        if len(w_clean) <= 1:
+                            return w_clean.upper()
+                        return (w_clean[0] + w_clean[-1]).upper()
+                        
+                    words = text_str.split()
+                    return " ".join(abbrev_word(w) for w in words)
+                
+                # STEP A1: Apply full column-level redaction
                 for col in fully_masked_cols:
                     sanitized_df[col] = "<REDACTED>"
                     
+                # STEP A2: Apply column-level word abbreviation
+                for col in abbreviated_cols:
+                    sanitized_df[col] = sanitized_df[col].apply(abbreviate_text)
+                    
                 # STEP B: Apply smart entity-level scanner (Control B) and Custom Redactions (Control C)
-                remaining_cols = [c for c in df.columns if c not in fully_masked_cols]
+                # Filter out redacted or abbreviated columns to avoid double processing
+                remaining_cols = [c for c in df.columns if c not in fully_masked_cols and c not in abbreviated_cols]
                 
                 # Cell-level dynamic masking processor
                 def mask_cell(val):
@@ -198,7 +239,7 @@ if uploaded_file is not None:
                         return val
                     
                     val_str = str(val).strip()
-                    if not val_str:
+                    if not val_str or val_str.lower() in ["nan", "nat", "<na>", "none"]:
                         return ""
                     
                     # 1. Apply Presidio Smart Entity Masking
@@ -209,7 +250,6 @@ if uploaded_file is not None:
                     if custom_redact_list:
                         for term in custom_redact_list:
                             # A. Sanitize entity tags containing the custom brand term (e.g. <MG_BRAND> -> #)
-                            # to avoid disclosing the brand name inside the redact placeholder
                             tag_pattern = re.compile(rf"<[A-Z_]*{re.escape(term.upper())}[A-Z_]*>", re.IGNORECASE)
                             masked_val = tag_pattern.sub("#", masked_val)
                             
