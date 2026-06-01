@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 # Import the existing generalized backend modules
-from config import POLICIES_DIR, DEFAULT_POLICY_PATH
+from config import DEFAULT_POLICY_PATH
 from app.data_masking.masking_policy import MaskingPolicy
 from app.data_masking.masking_engine import MaskingEngine
 
@@ -78,36 +78,6 @@ if uploaded_file is not None:
             
         st.divider()
         
-        # Dynamic Policy Selection (Determines dynamic scanner options in Control B)
-        st.write("### Active Enterprise Policy Template")
-        policy_files = sorted(list(POLICIES_DIR.glob("*.yaml")))
-        policy_options = []
-        policy_path_map = {}
-        
-        for pf in policy_files:
-            if pf.name == "default_policy.yaml":
-                label = "Standard PII Only (default)"
-            elif pf.name == "mg_policy.yaml":
-                label = "MG Motors Enterprise Data"
-            else:
-                name_clean = pf.stem.replace("_", " ").title()
-                label = f"{name_clean} Enterprise Data"
-            policy_options.append(label)
-            policy_path_map[label] = pf
-            
-        selected_policy_label = st.selectbox(
-            "Select base policy configuration:",
-            options=policy_options,
-            index=0,
-            help="Loads default column mappings, entity classifiers, and dynamic domain properties (brand, models, regex)."
-        )
-        
-        # Load the selected policy dynamically
-        policy_path = policy_path_map[selected_policy_label]
-        base_policy = MaskingPolicy.from_yaml(str(policy_path))
-        
-        st.divider()
-        
         # Dynamic Configuration Section
         st.subheader("2. Configuration & Sensitivity Rules")
         st.write("Configure column-level overrides, smart PII scanner boundaries, and custom word targets.")
@@ -117,7 +87,7 @@ if uploaded_file is not None:
         with cfg_col1:
             with st.container(border=True):
                 st.write("### A: Full Column Redaction")
-                st.caption("Select columns to fully mask with a static placeholder (`<REDACTED>`).")
+                st.caption("Select columns to fully redact with a static placeholder (`<REDACTED>`).")
                 
                 fully_masked_cols = st.multiselect(
                     "Select columns to fully redact:",
@@ -128,26 +98,33 @@ if uploaded_file is not None:
         with cfg_col2:
             with st.container(border=True):
                 st.write("### B: Smart Entity Recognition")
-                st.caption("Identify specific PII or custom entities to scan for and redact in remaining columns.")
+                st.caption("Select specific PII or standard entities to scan for and redact in remaining columns.")
                 
-                # Dynamically load options directly from the loaded policy's rules!
-                entity_options = base_policy.entity_rules
+                # Universal, brand-agnostic scanners
+                entity_options = [
+                    "PERSON",
+                    "EMAIL_ADDRESS",
+                    "PHONE_NUMBER",
+                    "ORGANIZATION",
+                    "CREDIT_CARD",
+                    "US_SSN"
+                ]
                 
                 selected_entities = st.multiselect(
                     "Select entities to detect and redact:",
                     options=entity_options,
-                    default=[e for e in ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"] if e in entity_options] or entity_options[:3],
+                    default=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
                     help="The engine will scan cell strings in the remaining columns and mask matching instances."
                 )
             
         with cfg_col3:
             with st.container(border=True):
                 st.write("### C: Custom Term Redaction")
-                st.caption("Provide a comma-separated list of bespoke phrases or codes (e.g. `MG, Tata`) to target.")
+                st.caption("Provide a comma-separated list of bespoke phrases or codes (e.g. `MG, Tata, Tesla`) to target.")
                 
                 custom_redact_terms = st.text_input(
                     "Enter custom terms to mask (comma-separated):",
-                    placeholder="e.g., MG, Tata",
+                    placeholder="e.g., MG, Tata, Tesla",
                     help="The engine will perform case-insensitive redactions, replacing occurrences and related entity tags with '#'."
                 )
                 
@@ -168,9 +145,9 @@ if uploaded_file is not None:
                 # Make a copy of the dataframe to prevent side-effects
                 sanitized_df = df.copy()
                 
-                # -------------------------------------------------------------
-                # DYNAMIC POLICY CONSTRUCT (Feeding into backend MaskingPolicy)
-                # -------------------------------------------------------------
+                # Load the universal policy configuration directly
+                base_policy = MaskingPolicy.from_yaml(str(DEFAULT_POLICY_PATH))
+                
                 # Dynamically update the backend policy's entity rules to match the UI selections.
                 base_policy.entity_rules = selected_entities
                 
