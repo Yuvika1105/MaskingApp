@@ -1,0 +1,50 @@
+column_rules:
+  Model_Line1: MG_MODEL
+  Model_Line2: MG_MODEL
+  Model_Series: MG_MODEL
+  Material: MG_MATERIAL
+  Client: PERSON
+  Name_1: MG_BRAND
+  Branch: MG_BRAND
+  Zone: MG_BRAND
+  Company_Name: ORGANIZATION
+  Phone: PHONE_NUMBER
+  Email: EMAIL_ADDRESS
+
+entity_rules:
+  - MG_BRAND
+  - MG_MODEL
+  - MG_MATERIAL
+  - PERSON
+  - EMAIL_ADDRESS
+  - PHONE_NUMBER
+  - ORGANIZATION
+  - US_SSN
+  - CREDIT_CARD
+
+replacement_map:
+  MG_BRAND: "<CLIENT>"
+  MG_MODEL: "<MODEL_LINE>"
+  MG_MATERIAL: "<MATERIAL_CODE>"
+  ORGANIZATION: "<ORGANIZATION>"
+  PERSON: "<PERSON>"
+  EMAIL_ADDRESS: "<EMAIL_ADDRESS>"
+  PHONE_NUMBER: "<PHONE_NUMBER>"
+  US_SSN: "<US_SSN>"
+  CREDIT_CARD: "<CREDIT_CARD>"
+
+domain_config:
+  brand_name: "MG"
+  models:
+    - "ASTOR"
+    - "HECTOR"
+    - "HECTOR PLUS"
+    - "GLOSTER"
+    - "ZS EV"
+    - "COMET EV"
+    - "WINDSOR EV"
+    - "CLOUD EV"
+    - "MAJESTOR"
+    - "CYBERSTER"
+    - "M9"
+  material_code_regex: r"\b\d{4}[A-Z]{3}\b"
