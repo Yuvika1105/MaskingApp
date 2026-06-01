@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 # Import the existing generalized backend modules
-from config import MG_POLICY_PATH, DEFAULT_POLICY_PATH
+from config import POLICIES_DIR, DEFAULT_POLICY_PATH
 from app.data_masking.masking_policy import MaskingPolicy
 from app.data_masking.masking_engine import MaskingEngine
 
@@ -78,6 +78,36 @@ if uploaded_file is not None:
             
         st.divider()
         
+        # Dynamic Policy Selection (Determines dynamic scanner options in Control B)
+        st.write("### Active Enterprise Policy Template")
+        policy_files = sorted(list(POLICIES_DIR.glob("*.yaml")))
+        policy_options = []
+        policy_path_map = {}
+        
+        for pf in policy_files:
+            if pf.name == "default_policy.yaml":
+                label = "Standard PII Only (default)"
+            elif pf.name == "mg_policy.yaml":
+                label = "MG Motors Enterprise Data"
+            else:
+                name_clean = pf.stem.replace("_", " ").title()
+                label = f"{name_clean} Enterprise Data"
+            policy_options.append(label)
+            policy_path_map[label] = pf
+            
+        selected_policy_label = st.selectbox(
+            "Select base policy configuration:",
+            options=policy_options,
+            index=0,
+            help="Loads default column mappings, entity classifiers, and dynamic domain properties (brand, models, regex)."
+        )
+        
+        # Load the selected policy dynamically
+        policy_path = policy_path_map[selected_policy_label]
+        base_policy = MaskingPolicy.from_yaml(str(policy_path))
+        
+        st.divider()
+        
         # Dynamic Configuration Section
         st.subheader("2. Configuration & Sensitivity Rules")
         st.write("Configure column-level overrides, smart PII scanner boundaries, and custom word targets.")
@@ -100,18 +130,13 @@ if uploaded_file is not None:
                 st.write("### B: Smart Entity Recognition")
                 st.caption("Identify specific PII or custom entities to scan for and redact in remaining columns.")
                 
-                entity_options = [
-                    "PERSON",
-                    "EMAIL_ADDRESS",
-                    "PHONE_NUMBER",
-                    "MG_BRAND",
-                    "MG_MODEL"
-                ]
+                # Dynamically load options directly from the loaded policy's rules!
+                entity_options = base_policy.entity_rules
                 
                 selected_entities = st.multiselect(
                     "Select entities to detect and redact:",
                     options=entity_options,
-                    default=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
+                    default=[e for e in ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"] if e in entity_options] or entity_options[:3],
                     help="The engine will scan cell strings in the remaining columns and mask matching instances."
                 )
             
@@ -146,12 +171,6 @@ if uploaded_file is not None:
                 # -------------------------------------------------------------
                 # DYNAMIC POLICY CONSTRUCT (Feeding into backend MaskingPolicy)
                 # -------------------------------------------------------------
-                try:
-                    base_policy = MaskingPolicy.from_yaml(str(MG_POLICY_PATH))
-                except Exception:
-                    # Fallback to standard PII policy if MG configuration is not accessible
-                    base_policy = MaskingPolicy.from_yaml(str(DEFAULT_POLICY_PATH))
-                
                 # Dynamically update the backend policy's entity rules to match the UI selections.
                 base_policy.entity_rules = selected_entities
                 
@@ -167,9 +186,8 @@ if uploaded_file is not None:
                 
                 # Cell-level dynamic masking processor
                 def mask_cell(val):
-                    # Handle NaNs and null values correctly
-                    if pd.isna(val) or val is None or str(val).strip().lower() in ["nan", "nat", "<na>", "none"]:
-                        return ""
+                    if pd.isna(val):
+                        return val
                     
                     val_str = str(val).strip()
                     if not val_str:
