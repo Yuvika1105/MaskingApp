@@ -220,14 +220,36 @@ if uploaded_file is not None:
                         
                     words = text_str.split()
                     return " ".join(abbrev_word(w) for w in words)
+
+                # Helper to apply Custom Word / Phrase Redaction (Control C)
+                def apply_custom_redactions(val):
+                    if pd.isna(val):
+                        return val
+                    
+                    val_str = str(val).strip()
+                    if not val_str or val_str.lower() in ["nan", "nat", "<na>", "none"]:
+                        return ""
+                        
+                    masked_val = val_str
+                    if custom_redact_list:
+                        for term in custom_redact_list:
+                            # A. Sanitize entity tags containing the custom brand term (e.g. <MG_BRAND> -> #)
+                            tag_pattern = re.compile(rf"<[A-Z_]*{re.escape(term.upper())}[A-Z_]*>", re.IGNORECASE)
+                            masked_val = tag_pattern.sub("#", masked_val)
+                            
+                            # B. Direct substring replacement to mask letters (e.g. MG01 -> #01, Tata02 -> #02)
+                            substring_pattern = re.compile(re.escape(term), re.IGNORECASE)
+                            masked_val = substring_pattern.sub("#", masked_val)
+                                
+                    return masked_val
                 
                 # STEP A1: Apply full column-level redaction
                 for col in fully_masked_cols:
                     sanitized_df[col] = "<REDACTED>"
                     
-                # STEP A2: Apply column-level word abbreviation
+                # STEP A2: Apply custom word redactions and then column-level word abbreviation
                 for col in abbreviated_cols:
-                    sanitized_df[col] = sanitized_df[col].apply(abbreviate_text)
+                    sanitized_df[col] = sanitized_df[col].apply(apply_custom_redactions).apply(abbreviate_text)
                     
                 # STEP B: Apply smart entity-level scanner (Control B) and Custom Redactions (Control C)
                 # Filter out redacted or abbreviated columns to avoid double processing
@@ -247,15 +269,7 @@ if uploaded_file is not None:
                     masked_val = res.masked_text
                     
                     # 2. Apply Custom Word / Phrase Redaction (Control C)
-                    if custom_redact_list:
-                        for term in custom_redact_list:
-                            # A. Sanitize entity tags containing the custom brand term (e.g. <MG_BRAND> -> #)
-                            tag_pattern = re.compile(rf"<[A-Z_]*{re.escape(term.upper())}[A-Z_]*>", re.IGNORECASE)
-                            masked_val = tag_pattern.sub("#", masked_val)
-                            
-                            # B. Direct substring replacement to mask letters (e.g. MG01 -> #01, Tata02 -> #02)
-                            substring_pattern = re.compile(re.escape(term), re.IGNORECASE)
-                            masked_val = substring_pattern.sub("#", masked_val)
+                    masked_val = apply_custom_redactions(masked_val)
                                 
                     return masked_val
                 
@@ -266,7 +280,7 @@ if uploaded_file is not None:
                     
                 elapsed_time = time.time() - start_time
                 
-                st.success(f"Processing Completed! Sanitized successfully in {elapsed_time:.3f} seconds.")
+                st.success(f"Processing Completed! Masked successfully in {elapsed_time:.3f} seconds.")
                 
                 st.divider()
                 
@@ -284,9 +298,9 @@ if uploaded_file is not None:
                 
                 # Premium secure export button
                 st.download_button(
-                    label="Download Sanitized CSV File",
+                    label="Download Masked File",
                     data=csv_bytes,
-                    file_name=f"sanitized_{file_name}",
+                    file_name=f"masked_{file_name}",
                     mime="text/csv",
                     use_container_width=True
                 )
@@ -296,4 +310,4 @@ if uploaded_file is not None:
         st.exception(err)
         
 else:
-    st.info("To start sanitizing corporate datasets, please upload a valid CSV or Excel spreadsheet using the uploader above.")
+    st.info("To start masking corporate datasets, please upload a valid CSV or Excel spreadsheet using the uploader above.")
