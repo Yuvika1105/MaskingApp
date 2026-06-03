@@ -113,7 +113,7 @@ def load_masking_engine(policy_path: str, custom_rules_json: str) -> MaskingEngi
 
 
 # Main layout
-st.markdown('<div class="main-title">🛡️ SafeGuard</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title"> SafeGuard</div>', unsafe_allow_html=True)
 st.markdown('<div class="main-subtitle">Dynamic Data Masking & Sensitivity Diagnostics Dashboard</div>', unsafe_allow_html=True)
 
 # Initialize session state for custom rules if not present
@@ -122,7 +122,7 @@ if "custom_rules" not in st.session_state:
 
 # ----------------- SIDEBAR CONFIGURATION -----------------
 with st.sidebar:
-    st.header("⚙️ Configuration Hub")
+    st.header("Configuration Hub")
     
     # 1. Masking Policy choice - scan POLICIES_DIR dynamically for all yaml files
     policy_files = sorted(list(POLICIES_DIR.glob("*.yaml")))
@@ -443,16 +443,28 @@ if uploaded_file is not None:
                 with st.spinner("Executing dynamic column redactions..."):
                     start_time = time.time()
                     
-                    df_masked = FileProcessor.process_csv(
-                        file_bytes=file_bytes,
-                        engine=engine,
-                        column_strategies=column_strategies,
-                        column_constants=column_constants,
-                        selected_columns=selected_cols,
-                        row_filter_col=rf_col if rf_col != "None" else None,
-                        row_filter_op=rf_op,
-                        row_filter_val=rf_val
-                    )
+                    if suffix == ".csv":
+                        df_masked = FileProcessor.process_csv(
+                            file_bytes=file_bytes,
+                            engine=engine,
+                            column_strategies=column_strategies,
+                            column_constants=column_constants,
+                            selected_columns=selected_cols,
+                            row_filter_col=rf_col if rf_col != "None" else None,
+                            row_filter_op=rf_op,
+                            row_filter_val=rf_val
+                        )
+                    else:
+                        df_masked = FileProcessor.process_excel(
+                            file_bytes=file_bytes,
+                            engine=engine,
+                            column_strategies=column_strategies,
+                            column_constants=column_constants,
+                            selected_columns=selected_cols,
+                            row_filter_col=rf_col if rf_col != "None" else None,
+                            row_filter_op=rf_op,
+                            row_filter_val=rf_val
+                        )
                     
                     elapsed = time.time() - start_time
                     st.session_state.df_masked = df_masked

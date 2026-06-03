@@ -221,7 +221,6 @@ if uploaded_file is not None:
                     words = text_str.split()
                     return " ".join(abbrev_word(w) for w in words)
 
-                # Helper to apply Custom Word / Phrase Redaction (Control C)
                 def apply_custom_redactions(val):
                     if pd.isna(val):
                         return val
@@ -233,29 +232,22 @@ if uploaded_file is not None:
                     masked_val = val_str
                     if custom_redact_list:
                         for term in custom_redact_list:
-                            # A. Sanitize entity tags containing the custom brand term (e.g. <MG_BRAND> -> #)
                             tag_pattern = re.compile(rf"<[A-Z_]*{re.escape(term.upper())}[A-Z_]*>", re.IGNORECASE)
                             masked_val = tag_pattern.sub("#", masked_val)
                             
-                            # B. Direct substring replacement to mask letters (e.g. MG01 -> #01, Tata02 -> #02)
                             substring_pattern = re.compile(re.escape(term), re.IGNORECASE)
                             masked_val = substring_pattern.sub("#", masked_val)
                                 
                     return masked_val
                 
-                # STEP A1: Apply full column-level redaction
                 for col in fully_masked_cols:
                     sanitized_df[col] = "<REDACTED>"
                     
-                # STEP A2: Apply custom word redactions and then column-level word abbreviation
                 for col in abbreviated_cols:
                     sanitized_df[col] = sanitized_df[col].apply(apply_custom_redactions).apply(abbreviate_text)
                     
-                # STEP B: Apply smart entity-level scanner (Control B) and Custom Redactions (Control C)
-                # Filter out redacted or abbreviated columns to avoid double processing
                 remaining_cols = [c for c in df.columns if c not in fully_masked_cols and c not in abbreviated_cols]
                 
-                # Cell-level dynamic masking processor
                 def mask_cell(val):
                     if pd.isna(val):
                         return val
@@ -264,18 +256,14 @@ if uploaded_file is not None:
                     if not val_str or val_str.lower() in ["nan", "nat", "<na>", "none"]:
                         return ""
                     
-                    # 1. Apply Presidio Smart Entity Masking
                     res = engine.mask_text(val_str)
                     masked_val = res.masked_text
                     
-                    # 2. Apply Custom Word / Phrase Redaction (Control C)
                     masked_val = apply_custom_redactions(masked_val)
                                 
                     return masked_val
                 
-                # Process columns
                 for col in remaining_cols:
-                    # Apply masking cell-by-cell without pre-casting the whole column (preserves nulls correctly)
                     sanitized_df[col] = sanitized_df[col].apply(mask_cell)
                     
                 elapsed_time = time.time() - start_time

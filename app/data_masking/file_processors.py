@@ -106,13 +106,13 @@ class FileProcessor:
                 const_val = column_constants.get(col, None)
                 
                 # Apply mask to cells in rows matching filter
-                def mask_cell(v, index):
+                def mask_cell(v, index, c=col, s=strat, cv=const_val):
                     if not rows_to_mask.loc[index]:
                         return v
-                    return engine.mask_value(col, str(v), strat, const_val)
+                    return engine.mask_value(c, str(v), s, cv)
 
                 # Vectorized or apply-based cell-level replacement
-                df[col] = df.apply(lambda r: mask_cell(r[col], r.name), axis=1)
+                df[col] = df.apply(lambda r, c=col: mask_cell(r[c], r.name), axis=1)
                 
         return df
 
@@ -156,12 +156,12 @@ class FileProcessor:
                 const_val = column_constants.get(col, None)
                 
                 # Apply mask to cells in rows matching filter
-                def mask_cell(v, index):
+                def mask_cell(v, index, c=col, s=strat, cv=const_val):
                     if not rows_to_mask.loc[index]:
                         return v
-                    return engine.mask_value(col, str(v), strat, const_val)
+                    return engine.mask_value(c, str(v), s, cv)
                 
-                df[col] = df.apply(lambda r: mask_cell(r[col], r.name), axis=1)
+                df[col] = df.apply(lambda r, c=col: mask_cell(r[c], r.name), axis=1)
                 
         return df
 
