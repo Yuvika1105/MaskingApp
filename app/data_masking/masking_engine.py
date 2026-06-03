@@ -28,6 +28,11 @@ def apply_masking_strategy(value: str, strategy: str, entity_type: str = "PII", 
         return value
         
     elif strategy == "Redaction":
+        if entity_type == "PHONE_NUMBER":
+            clean = val_str.replace(" ", "").replace("-", "").replace("+", "").replace("(", "").replace(")", "")
+            if len(clean) >= 3:
+                return "X" * (len(clean) - 3) + clean[-3:]
+            return "X" * len(clean)
         return f"<{entity_type}>"
         
     elif strategy == "Hashing":
@@ -49,8 +54,11 @@ def apply_masking_strategy(value: str, strategy: str, entity_type: str = "PII", 
             return f"{masked_username}@{domain}"
         elif len(val_str) <= 3:
             return "*" * len(val_str)
-        elif val_str.replace("+", "").replace("-", "").replace(" ", "").isdigit() and len(val_str) >= 7:  # phone
-            return val_str[:3] + "*" * (len(val_str) - 5) + val_str[-2:]
+        elif val_str.replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "").isdigit() and len(val_str) >= 7:  # phone
+            clean = val_str.replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+            if len(clean) >= 3:
+                return "X" * (len(clean) - 3) + clean[-3:]
+            return "X" * len(clean)
         else:
             return val_str[0] + "*" * (len(val_str) - 2) + val_str[-1]
             
@@ -298,6 +306,12 @@ class MaskingEngine:
         
         if strategy == "Redaction" and model_rec:
             return model_rec.abbreviate(value)
+        elif strategy == "Redaction" and target_entity == "PHONE_NUMBER":
+            # Phone numbers: always mask to XXXXXXX278 format (last 3 digits visible)
+            clean = value.replace(" ", "").replace("-", "").replace("+", "").replace("(", "").replace(")", "")
+            if len(clean) >= 3:
+                return "X" * (len(clean) - 3) + clean[-3:]
+            return "X" * len(clean)
         elif strategy == "Redaction" and target_entity in self.policy.replacement_map:
             # If standard replacement map has a mapped replacement, return it
             return self.policy.replacement_map[target_entity]
